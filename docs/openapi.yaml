@@ -1,0 +1,1149 @@
+openapi: 3.0.3
+info:
+  title: Hex Microservices API
+  description: |
+    Comprehensive API documentation for the Hex Microservices architecture.
+    
+    ## Architecture Overview
+    - **API Gateway** (port 3000): Authentication and routing
+    - **Hex Data Service** (port 3001): TCP data logging and management
+    - **Notification Service** (port 3002): Push notifications and device management
+    
+    ## Authentication
+    Most endpoints require JWT Bearer token authentication. Obtain tokens via `/api/auth/login`.
+    
+    ## Base URLs
+    - API Gateway: `http://localhost:3000`
+    - Hex Data Service: `http://localhost:3001` 
+    - Notification Service: `http://localhost:3002`
+  version: 1.0.0
+  contact:
+    name: Hex Microservices API
+    email: developer@hexmicroservices.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: API Gateway (main entry point)
+  - url: http://localhost:3001
+    description: Hex Data Service
+  - url: http://localhost:3002
+    description: Notification Service
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Hex Logs
+    description: TCP data logging and log management
+  - name: Notifications
+    description: Push notification management
+  - name: Devices
+    description: Device token management for notifications
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /api/auth/login
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: Indicates if the request was successful
+        data:
+          type: object
+          description: Response data (varies by endpoint)
+        error:
+          type: string
+          description: Error message (present when success is false)
+        message:
+          type: string
+          description: Additional information about the response
+      required:
+        - success
+
+    HexLog:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique log entry identifier
+        timestamp:
+          type: string
+          format: date-time
+          description: When the log entry was created
+        clientIP:
+          type: string
+          description: IP address of the client that sent the data
+        dataLength:
+          type: integer
+          description: Length of the received data in bytes
+        hexData:
+          type: string
+          description: Hexadecimal representation of the received data
+        asciiData:
+          type: string
+          description: ASCII representation of the received data
+        fileName:
+          type: string
+          description: File where this log entry is stored
+      required:
+        - id
+        - timestamp
+        - clientIP
+        - dataLength
+        - hexData
+        - asciiData
+        - fileName
+
+    NotificationPayload:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Notification title
+        body:
+          type: string
+          description: Notification body text
+        data:
+          type: object
+          additionalProperties: true
+          description: Custom data payload
+        icon:
+          type: string
+          description: URL to notification icon
+        badge:
+          type: integer
+          description: Badge count for the notification
+      required:
+        - title
+        - body
+
+    DeviceToken:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique device identifier
+        token:
+          type: string
+          description: Push notification token
+        platform:
+          type: string
+          enum: [ios, android, web]
+          description: Device platform
+        userId:
+          type: string
+          description: Associated user ID (optional)
+        createdAt:
+          type: string
+          format: date-time
+          description: When the device was registered
+        isActive:
+          type: boolean
+          description: Whether the device is active
+      required:
+        - id
+        - token
+        - platform
+        - createdAt
+        - isActive
+
+    NotificationRequest:
+      type: object
+      properties:
+        deviceTokens:
+          type: array
+          items:
+            type: string
+          description: Array of device tokens to send notification to
+        payload:
+          $ref: '#/components/schemas/NotificationPayload'
+        priority:
+          type: string
+          enum: [high, normal]
+          description: Notification priority
+        collapseKey:
+          type: string
+          description: Collapse key for notification grouping
+      required:
+        - deviceTokens
+        - payload
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique user identifier
+        username:
+          type: string
+          description: Username
+        role:
+          type: string
+          enum: [user, admin]
+          description: User role
+        createdAt:
+          type: string
+          format: date-time
+          description: When the user was created
+      required:
+        - id
+        - username
+        - role
+        - createdAt
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: User's username
+        password:
+          type: string
+          description: User's password
+      required:
+        - username
+        - password
+
+    RegisterRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Desired username
+        password:
+          type: string
+          description: User's password
+        role:
+          type: string
+          enum: [user, admin]
+          default: user
+          description: User role
+      required:
+        - username
+        - password
+
+paths:
+  # Authentication Endpoints
+  /api/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and return JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: "admin"
+              password: "admin123"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                            description: JWT token
+                          user:
+                            $ref: '#/components/schemas/User'
+              example:
+                success: true
+                data:
+                  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  user:
+                    id: "admin-001"
+                    username: "admin"
+                    role: "admin"
+                message: "Login successful"
+        '400':
+          description: Missing username or password
+        '401':
+          description: Invalid credentials
+
+  /api/auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: User registration
+      description: Register a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              username: "newuser"
+              password: "securepassword"
+              role: "user"
+      responses:
+        '201':
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                          user:
+                            $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid input or missing fields
+        '409':
+          description: Username already exists
+
+  /api/auth/verify:
+    get:
+      tags:
+        - Authentication
+      summary: Verify JWT token
+      description: Verify if the provided JWT token is valid
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          userId:
+                            type: string
+                          role:
+                            type: string
+                          exp:
+                            type: integer
+                          iat:
+                            type: integer
+        '401':
+          description: Invalid or expired token
+
+  /api/auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user info
+      description: Get information about the currently authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User information retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '401':
+          description: Authentication required
+        '404':
+          description: User not found
+
+  /api/auth/users:
+    get:
+      tags:
+        - Authentication
+      summary: List all users (Admin only)
+      description: Get a list of all registered users (requires admin role)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Users list retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          users:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/User'
+                          count:
+                            type: integer
+        '401':
+          description: Authentication required
+        '403':
+          description: Admin access required
+
+  # Hex Data Service Endpoints
+  /api/logs:
+    get:
+      tags:
+        - Hex Logs
+      summary: Get logs with pagination and filtering
+      description: Retrieve hex logs with optional filtering by client IP and date range
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Page number for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+          description: Number of logs per page
+        - name: clientIP
+          in: query
+          schema:
+            type: string
+          description: Filter by client IP address
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter logs from this date (YYYY-MM-DD)
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter logs until this date (YYYY-MM-DD)
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Sort order by timestamp
+      responses:
+        '200':
+          description: Logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          logs:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/HexLog'
+                          total:
+                            type: integer
+                          page:
+                            type: integer
+                          limit:
+                            type: integer
+                          totalPages:
+                            type: integer
+        '500':
+          description: Server error
+
+  /api/logs/client/{clientIP}:
+    get:
+      tags:
+        - Hex Logs
+      summary: Get logs for specific client
+      description: Retrieve all logs from a specific client IP address
+      parameters:
+        - name: clientIP
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Client IP address
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Client logs retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          logs:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/HexLog'
+                          total:
+                            type: integer
+                          clientIP:
+                            type: string
+
+  /api/logs/stats:
+    get:
+      tags:
+        - Hex Logs
+      summary: Get logging statistics
+      description: Get statistics about the logging system
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totalLogs:
+                            type: integer
+                          totalClients:
+                            type: integer
+                          totalDataSize:
+                            type: integer
+                          averageDataSize:
+                            type: number
+                          oldestLog:
+                            type: string
+                            format: date-time
+                          newestLog:
+                            type: string
+                            format: date-time
+
+  /api/logs/cleanup:
+    delete:
+      tags:
+        - Hex Logs
+      summary: Delete old log files
+      description: Delete log files older than specified number of days
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+          description: Delete files older than this many days
+      responses:
+        '200':
+          description: Cleanup completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          deleted:
+                            type: integer
+                            description: Number of files deleted
+                          size:
+                            type: string
+                            description: Total size of deleted files
+
+  # Notification Service Endpoints
+  /api/notifications/send:
+    post:
+      tags:
+        - Notifications
+      summary: Send notification to multiple devices
+      description: Send a push notification to one or more devices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRequest'
+            example:
+              deviceTokens: ["token1", "token2"]
+              payload:
+                title: "New Data Received"
+                body: "Hex data from client 192.168.1.100"
+                data:
+                  clientIP: "192.168.1.100"
+                  timestamp: "2024-01-15T10:30:00Z"
+              priority: "high"
+      responses:
+        '200':
+          description: Notification sent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          success:
+                            type: boolean
+                          sentCount:
+                            type: integer
+                          failedCount:
+                            type: integer
+                          details:
+                            type: array
+                            items:
+                              type: object
+        '400':
+          description: Invalid request data
+
+  /api/notifications/send-bulk:
+    post:
+      tags:
+        - Notifications
+      summary: Send multiple different notifications
+      description: Send multiple different notifications in batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notifications:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/NotificationRequest'
+              required:
+                - notifications
+      responses:
+        '200':
+          description: Bulk notifications processed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          results:
+                            type: array
+                            items:
+                              type: object
+                          summary:
+                            type: object
+                            properties:
+                              totalSent:
+                                type: integer
+                              totalAttempted:
+                                type: integer
+                              batchCount:
+                                type: integer
+
+  /api/notifications/broadcast:
+    post:
+      tags:
+        - Notifications
+      summary: Broadcast notification to all devices
+      description: Send notification to all active devices (requires device service integration)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  $ref: '#/components/schemas/NotificationPayload'
+                platform:
+                  type: string
+                  enum: [ios, android, web, all]
+                  default: all
+              required:
+                - payload
+      responses:
+        '200':
+          description: Broadcast initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/notifications/test:
+    post:
+      tags:
+        - Notifications
+      summary: Send test notification
+      description: Send a test notification to a specific device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deviceToken:
+                  type: string
+                  description: Device token to send test notification to
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                  default: unknown
+              required:
+                - deviceToken
+            example:
+              deviceToken: "test-device-token-123"
+              platform: "web"
+      responses:
+        '200':
+          description: Test notification sent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          success:
+                            type: boolean
+                          sentCount:
+                            type: integer
+                          failedCount:
+                            type: integer
+
+  /api/notifications/queue/stats:
+    get:
+      tags:
+        - Notifications
+      summary: Get notification queue statistics
+      description: Get statistics about the notification queue
+      responses:
+        '200':
+          description: Queue statistics retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          pending:
+                            type: integer
+                          processing:
+                            type: integer
+                          completed:
+                            type: integer
+                          failed:
+                            type: integer
+
+  /api/notifications/queue/retry:
+    post:
+      tags:
+        - Notifications
+      summary: Retry failed notifications
+      description: Retry all failed notifications in the queue
+      responses:
+        '200':
+          description: Failed notifications retried
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          retriedCount:
+                            type: integer
+
+  # Device Management Endpoints
+  /api/devices/register:
+    post:
+      tags:
+        - Devices
+      summary: Register a new device
+      description: Register a device token for push notifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: Push notification token
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                  description: Device platform
+                userId:
+                  type: string
+                  description: Associated user ID (optional)
+              required:
+                - token
+                - platform
+            example:
+              token: "fcm-token-abc123"
+              platform: "android"
+              userId: "user-123"
+      responses:
+        '201':
+          description: Device registered successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DeviceToken'
+        '400':
+          description: Invalid platform or missing required fields
+
+  /api/devices/{deviceId}:
+    get:
+      tags:
+        - Devices
+      summary: Get device by ID
+      description: Retrieve a specific device by its ID
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device ID
+      responses:
+        '200':
+          description: Device found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DeviceToken'
+        '404':
+          description: Device not found
+
+    put:
+      tags:
+        - Devices
+      summary: Update device
+      description: Update device information (cannot update ID or token)
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                userId:
+                  type: string
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Device updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DeviceToken'
+        '404':
+          description: Device not found
+
+    delete:
+      tags:
+        - Devices
+      summary: Remove device
+      description: Permanently remove a device from the system
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Device removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Device not found
+
+  /api/devices/{deviceId}/deactivate:
+    delete:
+      tags:
+        - Devices
+      summary: Deactivate device
+      description: Deactivate a device (mark as inactive without removing)
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Device deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Device not found
+
+  /api/devices/user/{userId}:
+    get:
+      tags:
+        - Devices
+      summary: Get devices for a user
+      description: Get all devices registered for a specific user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: User ID
+      responses:
+        '200':
+          description: User devices retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          devices:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/DeviceToken'
+                          count:
+                            type: integer
+
+  /api/devices/platform/{platform}:
+    get:
+      tags:
+        - Devices
+      summary: Get devices by platform
+      description: Get all devices for a specific platform
+      parameters:
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ios, android, web]
+      responses:
+        '200':
+          description: Platform devices retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          devices:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/DeviceToken'
+                          count:
+                            type: integer
+                          platform:
+                            type: string
+
+  /api/devices:
+    get:
+      tags:
+        - Devices
+      summary: Get all active devices
+      description: Get all currently active devices
+      responses:
+        '200':
+          description: Active devices retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          devices:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/DeviceToken'
+                          count:
+                            type: integer
+
+  /api/devices/token/{token}:
+    delete:
+      tags:
+        - Devices
+      summary: Remove device by token
+      description: Remove a device using its push notification token
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device push notification token
+      responses:
+        '200':
+          description: Device removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: Device not found
+
+  /api/devices/admin/stats:
+    get:
+      tags:
+        - Devices
+      summary: Get device statistics
+      description: Get statistics about registered devices (admin endpoint)
+      responses:
+        '200':
+          description: Device statistics retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totalDevices:
+                            type: integer
+                          activeDevices:
+                            type: integer
+                          devicesByPlatform:
+                            type: object
+                            properties:
+                              ios:
+                                type: integer
+                              android:
+                                type: integer
+                              web:
+                                type: integer
+
+  /api/devices/admin/cleanup:
+    post:
+      tags:
+        - Devices
+      summary: Clean up inactive devices
+      description: Remove inactive devices older than specified days
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days:
+                  type: integer
+                  default: 30
+                  description: Remove devices inactive for this many days
+      responses:
+        '200':
+          description: Cleanup completed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          removedCount:
+                            type: integer

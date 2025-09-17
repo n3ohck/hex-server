@@ -1,0 +1,39 @@
+{
+  "name": "hex-microservices",
+  "version": "1.0.0",
+  "description": "Microservices architecture for hex data logging and notifications",
+  "main": "index.js",
+  "workspaces": [
+    "services/*"
+  ],
+  "scripts": {
+    "dev:all": "concurrently \"npm run dev --workspace=services/hex-data-service\" \"npm run dev --workspace=services/notification-service\" \"npm run dev --workspace=services/api-gateway\"",
+    "dev:hex": "npm run dev --workspace=services/hex-data-service",
+    "dev:notifications": "npm run dev --workspace=services/notification-service",
+    "dev:gateway": "npm run dev --workspace=services/api-gateway",
+    "build": "npm run build --workspaces",
+    "start": "npm run start --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose build"
+  },
+  "keywords": [
+    "microservices",
+    "express",
+    "notifications",
+    "hex",
+    "tcp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

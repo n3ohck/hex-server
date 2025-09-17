@@ -1,1 +1,11 @@
 *.log
+node_modules
+.env
+.DS_Store
+.vscode
+.idea
+.coverage
+.nyc_output
+.coverage
+dev-logs
+.claude

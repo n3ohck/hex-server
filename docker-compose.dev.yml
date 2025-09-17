@@ -1,0 +1,46 @@
+# Development override for docker-compose
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api-gateway:
+    build:
+      target: development
+    volumes:
+      - ./services/api-gateway/src:/app/src
+      - ./shared:/app/shared
+    environment:
+      - NODE_ENV=development
+      - DEBUG=*
+    command: npm run dev
+
+  hex-data-service:
+    build:
+      target: development
+    volumes:
+      - ./services/hex-data-service/src:/app/src
+      - ./shared:/app/shared
+      - ./dev-logs:/app/logs  # Local development logs
+    environment:
+      - NODE_ENV=development
+      - DEBUG=*
+      - LOG_DIR=/app/logs
+    command: npm run dev
+
+  notification-service:
+    build:
+      target: development
+    volumes:
+      - ./services/notification-service/src:/app/src
+      - ./shared:/app/shared
+    environment:
+      - NODE_ENV=development
+      - DEBUG=*
+    command: npm run dev
+
+  # Development tools
+  redis-commander:
+    profiles: []  # Always include in dev mode
+
+volumes:
+  dev-logs:
+    driver: local
