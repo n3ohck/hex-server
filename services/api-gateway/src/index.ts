@@ -7,8 +7,6 @@ import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { requestLogger, errorHandler } from '../shared/middleware';
-import { authMiddleware, optionalAuthMiddleware } from './middleware/auth';
-import { createAuthRoutes } from './routes/auth';
 import { createHealthRoutes } from './routes/health';
 
 const app = express();
@@ -48,7 +46,7 @@ app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:19006'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id', 'X-User-Role']
 }));
 
 // Rate limiting
@@ -89,8 +87,7 @@ app.get('/api/openapi.json', (req, res) => {
   res.json(swaggerDocument);
 });
 
-// Health check and auth routes
-app.use('/api/auth', createAuthRoutes());
+// Health check routes
 app.use('/api/health', createHealthRoutes(SERVICES));
 
 // Root health check
@@ -106,8 +103,14 @@ app.get('/', (req, res) => {
   });
 });
 
+// Middleware to pass authentication headers from external auth service
+const authHeadersMiddleware = (req: any, res: any, next: any) => {
+  // This middleware will be used to pass headers from Laravel auth service
+  next();
+};
+
 // Hex Data Service Proxy  
-app.use('/api/logs', optionalAuthMiddleware, createProxyMiddleware({
+app.use('/api/logs', authHeadersMiddleware, createProxyMiddleware({
   target: SERVICES['hex-data'].url,
   changeOrigin: true,
   timeout: SERVICES['hex-data'].timeout,
@@ -121,11 +124,16 @@ app.use('/api/logs', optionalAuthMiddleware, createProxyMiddleware({
       error: 'Hex Data Service unavailable'
     });
   },
-  onProxyReq: (proxyReq, req, res) => {
-    // Add user info to headers if authenticated
-    if ((req as any).user) {
-      proxyReq.setHeader('X-User-Id', (req as any).user.userId);
-      proxyReq.setHeader('X-User-Role', (req as any).user.role || 'user');
+  onProxyReq: (proxyReq, req) => {
+    // Pass through authentication headers from Laravel
+    const userId = req.get('X-User-Id');
+    const userRole = req.get('X-User-Role');
+    
+    if (userId) {
+      proxyReq.setHeader('X-User-Id', userId);
+    }
+    if (userRole) {
+      proxyReq.setHeader('X-User-Role', userRole);
     }
   }
 }));
@@ -139,7 +147,7 @@ app.use('/socket.io', createProxyMiddleware({
 }));
 
 // Notification Service Proxy
-app.use('/api/notifications', authMiddleware, createProxyMiddleware({
+app.use('/api/notifications', authHeadersMiddleware, createProxyMiddleware({
   target: SERVICES['notifications'].url,
   changeOrigin: true,
   timeout: SERVICES['notifications'].timeout,
@@ -153,17 +161,22 @@ app.use('/api/notifications', authMiddleware, createProxyMiddleware({
       error: 'Notification Service unavailable'
     });
   },
-  onProxyReq: (proxyReq, req, res) => {
-    // Add user info to headers
-    if ((req as any).user) {
-      proxyReq.setHeader('X-User-Id', (req as any).user.userId);
-      proxyReq.setHeader('X-User-Role', (req as any).user.role || 'user');
+  onProxyReq: (proxyReq, req) => {
+    // Pass through authentication headers from Laravel
+    const userId = req.get('X-User-Id');
+    const userRole = req.get('X-User-Role');
+    
+    if (userId) {
+      proxyReq.setHeader('X-User-Id', userId);
+    }
+    if (userRole) {
+      proxyReq.setHeader('X-User-Role', userRole);
     }
   }
 }));
 
 // Device Management Proxy
-app.use('/api/devices', authMiddleware, createProxyMiddleware({
+app.use('/api/devices', authHeadersMiddleware, createProxyMiddleware({
   target: SERVICES['notifications'].url,
   changeOrigin: true,
   timeout: SERVICES['notifications'].timeout,
@@ -177,11 +190,16 @@ app.use('/api/devices', authMiddleware, createProxyMiddleware({
       error: 'Device Service unavailable'
     });
   },
-  onProxyReq: (proxyReq, req, res) => {
-    // Add user info to headers
-    if ((req as any).user) {
-      proxyReq.setHeader('X-User-Id', (req as any).user.userId);
-      proxyReq.setHeader('X-User-Role', (req as any).user.role || 'user');
+  onProxyReq: (proxyReq, req) => {
+    // Pass through authentication headers from Laravel
+    const userId = req.get('X-User-Id');
+    const userRole = req.get('X-User-Role');
+    
+    if (userId) {
+      proxyReq.setHeader('X-User-Id', userId);
+    }
+    if (userRole) {
+      proxyReq.setHeader('X-User-Role', userRole);
     }
   }
 }));
@@ -223,6 +241,7 @@ app.listen(PORT, () => {
   Object.entries(SERVICES).forEach(([name, config]) => {
     console.log(`   ${name}: ${config.url}`);
   });
+  console.log(`📚 Documentation: http://localhost:${PORT}/api/docs`);
 });
 
 // Graceful shutdown

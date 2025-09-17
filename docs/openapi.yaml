@@ -5,12 +5,14 @@ info:
     Comprehensive API documentation for the Hex Microservices architecture.
     
     ## Architecture Overview
-    - **API Gateway** (port 3000): Authentication and routing
+    - **API Gateway** (port 3000): Pure routing and proxying
     - **Hex Data Service** (port 3001): TCP data logging and management
     - **Notification Service** (port 3002): Push notifications and device management
     
     ## Authentication
-    Most endpoints require JWT Bearer token authentication. Obtain tokens via `/api/auth/login`.
+    Authentication is handled by an external Laravel service. The API Gateway receives authentication
+    headers (`X-User-Id`, `X-User-Role`) from the Laravel service and passes them to the microservices.
+    The microservices themselves do not perform authentication validation.
     
     ## Base URLs
     - API Gateway: `http://localhost:3000`
@@ -33,23 +35,16 @@ servers:
     description: Notification Service
 
 tags:
-  - name: Authentication
-    description: User authentication and authorization
   - name: Hex Logs
     description: TCP data logging and log management
   - name: Notifications
     description: Push notification management
   - name: Devices
     description: Device token management for notifications
+  - name: Health
+    description: Health check endpoints
 
 components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: JWT token obtained from /api/auth/login
-
   schemas:
     ApiResponse:
       type: object
@@ -177,158 +172,17 @@ components:
         - deviceTokens
         - payload
 
-    User:
-      type: object
-      properties:
-        id:
-          type: string
-          description: Unique user identifier
-        username:
-          type: string
-          description: Username
-        role:
-          type: string
-          enum: [user, admin]
-          description: User role
-        createdAt:
-          type: string
-          format: date-time
-          description: When the user was created
-      required:
-        - id
-        - username
-        - role
-        - createdAt
-
-    LoginRequest:
-      type: object
-      properties:
-        username:
-          type: string
-          description: User's username
-        password:
-          type: string
-          description: User's password
-      required:
-        - username
-        - password
-
-    RegisterRequest:
-      type: object
-      properties:
-        username:
-          type: string
-          description: Desired username
-        password:
-          type: string
-          description: User's password
-        role:
-          type: string
-          enum: [user, admin]
-          default: user
-          description: User role
-      required:
-        - username
-        - password
-
 paths:
-  # Authentication Endpoints
-  /api/auth/login:
-    post:
-      tags:
-        - Authentication
-      summary: User login
-      description: Authenticate user and return JWT token
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LoginRequest'
-            example:
-              username: "admin"
-              password: "admin123"
-      responses:
-        '200':
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          token:
-                            type: string
-                            description: JWT token
-                          user:
-                            $ref: '#/components/schemas/User'
-              example:
-                success: true
-                data:
-                  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                  user:
-                    id: "admin-001"
-                    username: "admin"
-                    role: "admin"
-                message: "Login successful"
-        '400':
-          description: Missing username or password
-        '401':
-          description: Invalid credentials
-
-  /api/auth/register:
-    post:
-      tags:
-        - Authentication
-      summary: User registration
-      description: Register a new user account
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RegisterRequest'
-            example:
-              username: "newuser"
-              password: "securepassword"
-              role: "user"
-      responses:
-        '201':
-          description: Registration successful
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          token:
-                            type: string
-                          user:
-                            $ref: '#/components/schemas/User'
-        '400':
-          description: Invalid input or missing fields
-        '409':
-          description: Username already exists
-
-  /api/auth/verify:
+  # Health Check Endpoints
+  /api/health:
     get:
       tags:
-        - Authentication
-      summary: Verify JWT token
-      description: Verify if the provided JWT token is valid
-      security:
-        - BearerAuth: []
+        - Health
+      summary: Overall health check
+      description: Get the health status of all services
       responses:
         '200':
-          description: Token is valid
+          description: System is healthy
           content:
             application/json:
               schema:
@@ -339,73 +193,17 @@ paths:
                       data:
                         type: object
                         properties:
-                          userId:
+                          status:
                             type: string
-                          role:
-                            type: string
-                          exp:
-                            type: integer
-                          iat:
-                            type: integer
-        '401':
-          description: Invalid or expired token
-
-  /api/auth/me:
-    get:
-      tags:
-        - Authentication
-      summary: Get current user info
-      description: Get information about the currently authenticated user
-      security:
-        - BearerAuth: []
-      responses:
-        '200':
-          description: User information retrieved
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/User'
-        '401':
-          description: Authentication required
-        '404':
-          description: User not found
-
-  /api/auth/users:
-    get:
-      tags:
-        - Authentication
-      summary: List all users (Admin only)
-      description: Get a list of all registered users (requires admin role)
-      security:
-        - BearerAuth: []
-      responses:
-        '200':
-          description: Users list retrieved
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          users:
+                            enum: [healthy, degraded]
+                          services:
                             type: array
                             items:
-                              $ref: '#/components/schemas/User'
-                          count:
-                            type: integer
-        '401':
-          description: Authentication required
-        '403':
-          description: Admin access required
+                              type: object
+                          gateway:
+                            type: object
+        '503':
+          description: System is degraded or unhealthy
 
   # Hex Data Service Endpoints
   /api/logs:
@@ -685,35 +483,6 @@ paths:
                               batchCount:
                                 type: integer
 
-  /api/notifications/broadcast:
-    post:
-      tags:
-        - Notifications
-      summary: Broadcast notification to all devices
-      description: Send notification to all active devices (requires device service integration)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                payload:
-                  $ref: '#/components/schemas/NotificationPayload'
-                platform:
-                  type: string
-                  enum: [ios, android, web, all]
-                  default: all
-              required:
-                - payload
-      responses:
-        '200':
-          description: Broadcast initiated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiResponse'
-
   /api/notifications/test:
     post:
       tags:
@@ -757,56 +526,6 @@ paths:
                           sentCount:
                             type: integer
                           failedCount:
-                            type: integer
-
-  /api/notifications/queue/stats:
-    get:
-      tags:
-        - Notifications
-      summary: Get notification queue statistics
-      description: Get statistics about the notification queue
-      responses:
-        '200':
-          description: Queue statistics retrieved
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          pending:
-                            type: integer
-                          processing:
-                            type: integer
-                          completed:
-                            type: integer
-                          failed:
-                            type: integer
-
-  /api/notifications/queue/retry:
-    post:
-      tags:
-        - Notifications
-      summary: Retry failed notifications
-      description: Retry all failed notifications in the queue
-      responses:
-        '200':
-          description: Failed notifications retried
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          retriedCount:
                             type: integer
 
   # Device Management Endpoints
@@ -944,28 +663,6 @@ paths:
         '404':
           description: Device not found
 
-  /api/devices/{deviceId}/deactivate:
-    delete:
-      tags:
-        - Devices
-      summary: Deactivate device
-      description: Deactivate a device (mark as inactive without removing)
-      parameters:
-        - name: deviceId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Device deactivated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiResponse'
-        '404':
-          description: Device not found
-
   /api/devices/user/{userId}:
     get:
       tags:
@@ -999,41 +696,6 @@ paths:
                           count:
                             type: integer
 
-  /api/devices/platform/{platform}:
-    get:
-      tags:
-        - Devices
-      summary: Get devices by platform
-      description: Get all devices for a specific platform
-      parameters:
-        - name: platform
-          in: path
-          required: true
-          schema:
-            type: string
-            enum: [ios, android, web]
-      responses:
-        '200':
-          description: Platform devices retrieved
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          devices:
-                            type: array
-                            items:
-                              $ref: '#/components/schemas/DeviceToken'
-                          count:
-                            type: integer
-                          platform:
-                            type: string
-
   /api/devices:
     get:
       tags:
@@ -1058,92 +720,4 @@ paths:
                             items:
                               $ref: '#/components/schemas/DeviceToken'
                           count:
-                            type: integer
-
-  /api/devices/token/{token}:
-    delete:
-      tags:
-        - Devices
-      summary: Remove device by token
-      description: Remove a device using its push notification token
-      parameters:
-        - name: token
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Device push notification token
-      responses:
-        '200':
-          description: Device removed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiResponse'
-        '404':
-          description: Device not found
-
-  /api/devices/admin/stats:
-    get:
-      tags:
-        - Devices
-      summary: Get device statistics
-      description: Get statistics about registered devices (admin endpoint)
-      responses:
-        '200':
-          description: Device statistics retrieved
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          totalDevices:
-                            type: integer
-                          activeDevices:
-                            type: integer
-                          devicesByPlatform:
-                            type: object
-                            properties:
-                              ios:
-                                type: integer
-                              android:
-                                type: integer
-                              web:
-                                type: integer
-
-  /api/devices/admin/cleanup:
-    post:
-      tags:
-        - Devices
-      summary: Clean up inactive devices
-      description: Remove inactive devices older than specified days
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                days:
-                  type: integer
-                  default: 30
-                  description: Remove devices inactive for this many days
-      responses:
-        '200':
-          description: Cleanup completed
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          removedCount:
                             type: integer
