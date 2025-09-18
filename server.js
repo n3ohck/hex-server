@@ -76,7 +76,8 @@ const httpServer = http.createServer((req, res) => {
 
     req.on('end', () => {
         const body = Buffer.concat(chunks);
-        const logFile = path.join(LOG_DIR, `http-${ipSan}.log`);
+        const connTs = new Date().toISOString().replace(/[:.]/g, '-');
+        const logFile = path.join(LOG_DIR, `http-${ipSan}-${connTs}.log`);
         const header = `${new Date().toISOString()} ${req.method} ${req.url} from ${ip} (${bytes} bytes)`;
         const line = logLine(ip, body, 'HTTP');
 
