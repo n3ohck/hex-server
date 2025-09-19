@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Client - Notify Server</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 20px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #34495e;
+        }
+
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none;
+            border-color: #4facfe;
+            box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(79, 172, 254, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .notifications {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            background: white;
+        }
+
+        .notification {
+            padding: 15px;
+            border-bottom: 1px solid #f1f3f4;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .notification:last-child {
+            border-bottom: none;
+        }
+
+        .notification-title {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .notification-body {
+            color: #7f8c8d;
+            margin-bottom: 8px;
+        }
+
+        .notification-data {
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #495057;
+            white-space: pre-wrap;
+        }
+
+        .notification-time {
+            font-size: 11px;
+            color: #adb5bd;
+            margin-top: 5px;
+        }
+
+        .logs {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+        }
+
+        .log-entry.info { color: #3498db; }
+        .log-entry.success { color: #2ecc71; }
+        .log-entry.warning { color: #f39c12; }
+        .log-entry.error { color: #e74c3c; }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .ping-info {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #1976d2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔔 Test Client - Notify Server</h1>
+            <p>Cliente de prueba para el servidor de notificaciones en tiempo real</p>
+        </div>
+
+        <div class="content">
+            <!-- Estado de Conexión -->
+            <div class="section">
+                <h3>🔌 Estado de Conexión</h3>
+                <div id="status" class="status disconnected">Desconectado</div>
+                
+                <div class="form-group">
+                    <label for="serverUrl">URL del Servidor:</label>
+                    <input type="text" id="serverUrl" value="http://localhost:3001" placeholder="http://localhost:3001">
+                </div>
+
+                <div class="form-group">
+                    <label for="authToken">Token de Autenticación:</label>
+                    <input type="text" id="authToken" value="dev-token-123" placeholder="Tu token de autenticación">
+                </div>
+
+                <div class="form-group">
+                    <label for="userId">User ID:</label>
+                    <input type="text" id="userId" value="test-user" placeholder="ID del usuario">
+                </div>
+
+                <button id="connectBtn" class="btn btn-success">Conectar</button>
+                <button id="disconnectBtn" class="btn btn-danger" disabled>Desconectar</button>
+                <button id="pingBtn" class="btn" disabled>Ping</button>
+                
+                <div id="pingInfo" class="ping-info" style="display: none;">
+                    <strong>Último Ping:</strong> <span id="lastPing">-</span> | 
+                    <strong>Latencia:</strong> <span id="latency">-</span>ms
+                </div>
+            </div>
+
+            <!-- Notificaciones -->
+            <div class="section">
+                <h3>📨 Notificaciones Recibidas</h3>
+                <button id="clearNotificationsBtn" class="btn">Limpiar Notificaciones</button>
+                <div id="notifications" class="notifications">
+                    <div style="padding: 20px; text-align: center; color: #7f8c8d;">
+                        No hay notificaciones aún. Conecta y envía una notificación de prueba.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Envío de Notificaciones de Prueba -->
+            <div class="section">
+                <h3>🧪 Enviar Notificación de Prueba</h3>
+                <div class="form-group">
+                    <label for="testTitle">Título:</label>
+                    <input type="text" id="testTitle" value="Notificación de Prueba" placeholder="Título de la notificación">
+                </div>
+
+                <div class="form-group">
+                    <label for="testBody">Mensaje:</label>
+                    <textarea id="testBody" rows="3" placeholder="Mensaje de la notificación">Esta es una notificación de prueba enviada desde el cliente HTML.</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="testData">Datos Adicionales (JSON):</label>
+                    <textarea id="testData" rows="3" placeholder='{"type": "test", "priority": "high"}'>{ "type": "test", "priority": "high", "timestamp": "2024-01-01T00:00:00Z" }</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="internalToken">Token Interno:</label>
+                    <input type="text" id="internalToken" value="dev-internal-token-456" placeholder="Token para APIs REST">
+                </div>
+
+                <button id="sendNotificationBtn" class="btn">Enviar Notificación</button>
+                <button id="sendMultipleBtn" class="btn">Enviar Múltiples (5)</button>
+            </div>
+
+            <!-- Verificar Estado del Usuario -->
+            <div class="section">
+                <h3>👤 Estado del Usuario</h3>
+                <button id="checkOnlineBtn" class="btn">Verificar si está Online</button>
+                <div id="onlineStatus" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 6px; display: none;">
+                    <strong>Estado:</strong> <span id="onlineCount">-</span> conexiones activas
+                </div>
+            </div>
+
+            <!-- Logs -->
+            <div class="section">
+                <h3>📋 Logs del Sistema</h3>
+                <button id="clearLogsBtn" class="btn">Limpiar Logs</button>
+                <div id="logs" class="logs">Cliente iniciado. Listo para conectar...\n</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class NotifyTestClient {
+            constructor() {
+                this.socket = null;
+                this.isConnected = false;
+                this.pingStartTime = null;
+                this.notificationCount = 0;
+                
+                this.initializeElements();
+                this.bindEvents();
+                this.log('Cliente inicializado', 'info');
+            }
+
+            initializeElements() {
+                this.elements = {
+                    status: document.getElementById('status'),
+                    serverUrl: document.getElementById('serverUrl'),
+                    authToken: document.getElementById('authToken'),
+                    userId: document.getElementById('userId'),
+                    connectBtn: document.getElementById('connectBtn'),
+                    disconnectBtn: document.getElementById('disconnectBtn'),
+                    pingBtn: document.getElementById('pingBtn'),
+                    pingInfo: document.getElementById('pingInfo'),
+                    lastPing: document.getElementById('lastPing'),
+                    latency: document.getElementById('latency'),
+                    notifications: document.getElementById('notifications'),
+                    clearNotificationsBtn: document.getElementById('clearNotificationsBtn'),
+                    testTitle: document.getElementById('testTitle'),
+                    testBody: document.getElementById('testBody'),
+                    testData: document.getElementById('testData'),
+                    internalToken: document.getElementById('internalToken'),
+                    sendNotificationBtn: document.getElementById('sendNotificationBtn'),
+                    sendMultipleBtn: document.getElementById('sendMultipleBtn'),
+                    checkOnlineBtn: document.getElementById('checkOnlineBtn'),
+                    onlineStatus: document.getElementById('onlineStatus'),
+                    onlineCount: document.getElementById('onlineCount'),
+                    logs: document.getElementById('logs'),
+                    clearLogsBtn: document.getElementById('clearLogsBtn')
+                };
+            }
+
+            bindEvents() {
+                this.elements.connectBtn.addEventListener('click', () => this.connect());
+                this.elements.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.elements.pingBtn.addEventListener('click', () => this.ping());
+                this.elements.clearNotificationsBtn.addEventListener('click', () => this.clearNotifications());
+                this.elements.sendNotificationBtn.addEventListener('click', () => this.sendNotification());
+                this.elements.sendMultipleBtn.addEventListener('click', () => this.sendMultipleNotifications());
+                this.elements.checkOnlineBtn.addEventListener('click', () => this.checkOnlineStatus());
+                this.elements.clearLogsBtn.addEventListener('click', () => this.clearLogs());
+            }
+
+            log(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry ${type}`;
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                
+                this.elements.logs.appendChild(logEntry);
+                this.elements.logs.scrollTop = this.elements.logs.scrollHeight;
+            }
+
+            clearLogs() {
+                this.elements.logs.innerHTML = '';
+                this.log('Logs limpiados', 'info');
+            }
+
+            updateStatus(status, message) {
+                this.elements.status.className = `status ${status}`;
+                this.elements.status.textContent = message;
+            }
+
+            connect() {
+                if (this.isConnected) {
+                    this.log('Ya está conectado', 'warning');
+                    return;
+                }
+
+                const serverUrl = this.elements.serverUrl.value.trim();
+                const authToken = this.elements.authToken.value.trim();
+                const userId = this.elements.userId.value.trim();
+
+                if (!serverUrl || !authToken || !userId) {
+                    this.log('Por favor completa todos los campos', 'error');
+                    return;
+                }
+
+                this.updateStatus('connecting', 'Conectando...');
+                this.log(`Conectando a ${serverUrl} con usuario ${userId}`, 'info');
+
+                try {
+                    this.socket = io(serverUrl, {
+                        auth: {
+                            token: authToken,
+                            userId: userId
+                        },
+                        transports: ['websocket', 'polling'],
+                        upgrade: true,
+                        rememberUpgrade: true
+                    });
+
+                    this.socket.on('connect', () => {
+                        this.isConnected = true;
+                        this.updateStatus('connected', 'Conectado');
+                        this.elements.connectBtn.disabled = true;
+                        this.elements.disconnectBtn.disabled = false;
+                        this.elements.pingBtn.disabled = false;
+                        this.log('Conectado exitosamente', 'success');
+                    });
+
+                    this.socket.on('disconnect', (reason) => {
+                        this.isConnected = false;
+                        this.updateStatus('disconnected', `Desconectado: ${reason}`);
+                        this.elements.connectBtn.disabled = false;
+                        this.elements.disconnectBtn.disabled = true;
+                        this.elements.pingBtn.disabled = true;
+                        this.elements.pingInfo.style.display = 'none';
+                        this.log(`Desconectado: ${reason}`, 'warning');
+                    });
+
+                    this.socket.on('connect_error', (error) => {
+                        this.updateStatus('disconnected', `Error de conexión: ${error.message}`);
+                        this.log(`Error de conexión: ${error.message}`, 'error');
+                    });
+
+                    this.socket.on('pong:server', (data) => {
+                        const now = Date.now();
+                        const latency = now - this.pingStartTime;
+                        this.elements.lastPing.textContent = new Date(now).toLocaleTimeString();
+                        this.elements.latency.textContent = latency;
+                        this.elements.pingInfo.style.display = 'block';
+                        this.log(`Pong recibido - Latencia: ${latency}ms`, 'success');
+                    });
+
+                    this.socket.on('notify', (payload) => {
+                        this.addNotification(payload);
+                        this.log(`Notificación recibida: ${payload.title}`, 'success');
+                    });
+
+                } catch (error) {
+                    this.updateStatus('disconnected', 'Error de conexión');
+                    this.log(`Error al conectar: ${error.message}`, 'error');
+                }
+            }
+
+            disconnect() {
+                if (this.socket) {
+                    this.socket.disconnect();
+                    this.socket = null;
+                }
+            }
+
+            ping() {
+                if (!this.isConnected) {
+                    this.log('No estás conectado', 'error');
+                    return;
+                }
+
+                this.pingStartTime = Date.now();
+                this.socket.emit('ping:client');
+                this.log('Ping enviado', 'info');
+            }
+
+            addNotification(payload) {
+                this.notificationCount++;
+                
+                // Remover mensaje de "no hay notificaciones"
+                const emptyMessage = this.elements.notifications.querySelector('div[style*="text-align: center"]');
+                if (emptyMessage) {
+                    emptyMessage.remove();
+                }
+
+                const notification = document.createElement('div');
+                notification.className = 'notification';
+                
+                const time = new Date().toLocaleTimeString();
+                const dataStr = JSON.stringify(payload.data, null, 2);
+                
+                notification.innerHTML = `
+                    <div class="notification-title">${payload.title}</div>
+                    <div class="notification-body">${payload.body}</div>
+                    <div class="notification-data">${dataStr}</div>
+                    <div class="notification-time">Recibido: ${time}</div>
+                `;
+
+                this.elements.notifications.insertBefore(notification, this.elements.notifications.firstChild);
+                this.elements.notifications.scrollTop = 0;
+            }
+
+            clearNotifications() {
+                this.elements.notifications.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #7f8c8d;">
+                        No hay notificaciones aún. Conecta y envía una notificación de prueba.
+                    </div>
+                `;
+                this.notificationCount = 0;
+                this.log('Notificaciones limpiadas', 'info');
+            }
+
+            async sendNotification() {
+                const title = this.elements.testTitle.value.trim();
+                const body = this.elements.testBody.value.trim();
+                const dataStr = this.elements.testData.value.trim();
+                const userId = this.elements.userId.value.trim();
+                const internalToken = this.elements.internalToken.value.trim();
+                const serverUrl = this.elements.serverUrl.value.trim();
+
+                if (!title || !body || !userId || !internalToken) {
+                    this.log('Por favor completa todos los campos requeridos', 'error');
+                    return;
+                }
+
+                let data = {};
+                try {
+                    if (dataStr) {
+                        data = JSON.parse(dataStr);
+                    }
+                } catch (error) {
+                    this.log('Error en el JSON de datos: ' + error.message, 'error');
+                    return;
+                }
+
+                const payload = {
+                    userId: userId,
+                    title: title,
+                    body: body,
+                    data: data
+                };
+
+                try {
+                    this.log('Enviando notificación...', 'info');
+                    
+                    const response = await fetch(`${serverUrl}/v1/emit`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Internal-Auth': internalToken
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json();
+                    
+                    if (result.ok) {
+                        this.log('Notificación enviada exitosamente', 'success');
+                    } else {
+                        this.log(`Error al enviar notificación: ${result.error}`, 'error');
+                    }
+                } catch (error) {
+                    this.log(`Error de red: ${error.message}`, 'error');
+                }
+            }
+
+            async sendMultipleNotifications() {
+                this.log('Enviando 5 notificaciones de prueba...', 'info');
+                
+                for (let i = 1; i <= 5; i++) {
+                    setTimeout(() => {
+                        this.elements.testTitle.value = `Notificación ${i}`;
+                        this.elements.testBody.value = `Esta es la notificación número ${i} de 5`;
+                        this.elements.testData.value = JSON.stringify({
+                            type: 'batch_test',
+                            number: i,
+                            total: 5,
+                            timestamp: new Date().toISOString()
+                        }, null, 2);
+                        
+                        this.sendNotification();
+                    }, i * 1000); // Enviar cada segundo
+                }
+            }
+
+            async checkOnlineStatus() {
+                const userId = this.elements.userId.value.trim();
+                const serverUrl = this.elements.serverUrl.value.trim();
+
+                if (!userId) {
+                    this.log('Por favor ingresa un User ID', 'error');
+                    return;
+                }
+
+                try {
+                    this.log(`Verificando estado online para usuario: ${userId}`, 'info');
+                    
+                    const response = await fetch(`${serverUrl}/v1/online/${userId}`);
+                    const result = await response.json();
+                    
+                    if (result.ok) {
+                        this.elements.onlineCount.textContent = result.sockets;
+                        this.elements.onlineStatus.style.display = 'block';
+                        this.log(`Usuario ${userId} tiene ${result.sockets} conexiones activas`, 'success');
+                    } else {
+                        this.log(`Error al verificar estado: ${result.error}`, 'error');
+                    }
+                } catch (error) {
+                    this.log(`Error de red: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        // Inicializar el cliente cuando se carga la página
+        document.addEventListener('DOMContentLoaded', () => {
+            new NotifyTestClient();
+        });
+    </script>
+</body>
+</html>

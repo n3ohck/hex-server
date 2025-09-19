@@ -1,1 +1,9 @@
 *.log
+node_modules
+.env
+yarn.lock
+package-lock.json
+notify/.env
+notify/yarn.lock
+notify/package-lock.json    
+.env.local
