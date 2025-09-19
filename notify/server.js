@@ -41,6 +41,7 @@ const io = new Server(server, {
 
 // ===== Mongoose Models =====
 let Notification;
+let Idempotency;
 try {
 	// Reusar si ya existe (hot-reload)
 	Notification = mongoose.model("Notification");
@@ -68,6 +69,21 @@ try {
 
 	NotificationSchema.index({ userId: 1, createdAt: -1 });
 	Notification = mongoose.model("Notification", NotificationSchema);
+}
+
+try {
+  Idempotency = mongoose.model('Idempotency');
+} catch {
+  const IdempotencySchema = new mongoose.Schema(
+    {
+      key: { type: String, required: true, unique: true, index: true },
+      notificationId: { type: mongoose.Schema.Types.ObjectId, required: true },
+    },
+    { timestamps: { createdAt: 'createdAt', updatedAt: false } }
+  );
+  // TTL de 24h
+  IdempotencySchema.index({ createdAt: 1 }, { expireAfterSeconds: 86400 });
+  Idempotency = mongoose.model('Idempotency', IdempotencySchema);
 }
 
 app.set("trust proxy", true); // usa X-Forwarded-For si estás detrás de proxy
@@ -194,6 +210,7 @@ app.post("/v1/emit", requireInternalAuth, async (req, res) => {
 	if (!userId)
 		return res.status(400).json({ ok: false, error: "missing_userId" });
 
+	const idemKey = (req.headers["idempotency-key"] || "").toString();
 	const payload = {
 		title: title || "Aviso",
 		body: body || "",
@@ -204,9 +221,36 @@ app.post("/v1/emit", requireInternalAuth, async (req, res) => {
 	// Persistir en Mongo si está configurado
 	let saved = null;
 	if (MONGO_URI && mongoose.connection?.readyState === 1) {
+		// Idempotencia: si hay llave y ya existe, devolver mismo id
+		if (idemKey) {
+			try {
+				const existing = await Idempotency.findOne({ key: idemKey }).lean();
+        console.log('existing', existing);
+				if (existing?.notificationId && existing.notificationId !== null) {
+					return res.json({ ok: true, delivered: true, id: existing.notificationId });
+				}
+			} catch (_) {}
+		}
 		try {
+      console.log('payload', payload);
 			saved = await Notification.create({ userId: String(userId), ...payload });
+      console.log('saved', saved);
+			// Guardar mapping de idempotencia si corresponde
+			if (idemKey) {
+				try {
+					await Idempotency.create({ key: idemKey, notificationId: saved._id });
+				} catch (_) {
+					// si hay conflicto de clave, alguien creó antes: devolver el existente
+					try {
+						const existing = await Idempotency.findOne({ key: idemKey }).lean();
+						if (existing?.notificationId) {
+							return res.json({ ok: true, delivered: true, id: existing.notificationId });
+						}
+					} catch (_) {}
+				}
+			}
 		} catch (e) {
+      console.log('e', e);
 			// no bloquear por error de persistencia
 		}
 	}
