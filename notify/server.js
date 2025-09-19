@@ -147,6 +147,26 @@ io.on("connection", (socket) => {
 
 	console.log(`[connect] user=${userId} sid=${socket.id} ip=${ip}`);
 
+	// Cliente confirma que le llegó (entregada al dispositivo)
+	socket.on("notify:ack", async ({ id }) => {
+		try {
+			if (!id || mongoose.connection?.readyState !== 1) return;
+			await Notification.findByIdAndUpdate(id, { deliveredAt: new Date() }).exec();
+		} catch (_) {
+			// swallow, no romper flujo de socket
+		}
+	});
+
+	// Cliente marca como leída
+	socket.on("notify:read", async ({ id }) => {
+		try {
+			if (!id || mongoose.connection?.readyState !== 1) return;
+			await Notification.findByIdAndUpdate(id, { status: "read", readAt: new Date() }).exec();
+		} catch (_) {
+			// swallow
+		}
+	});
+
 	// Eco opcional
 	socket.on("ping:client", () =>
 		socket.emit("pong:server", { ts: Date.now() })
@@ -234,6 +254,21 @@ app.get("/v1/notifications/:userId", async (req, res) => {
 		res.status(500).json({ ok: false, error: "mongo_query_error" });
 	}
 });
+
+app.post('/v1/notifications/:id/read', requireInternalAuth, async (req, res) => {
+  try {
+    await Notification.findByIdAndUpdate(req.params.id, { status:'read', readAt:new Date() }).exec();
+    res.json({ ok: true });
+  } catch { res.status(500).json({ ok:false }); }
+});
+
+app.post('/v1/notifications/:id/hide', requireInternalAuth, async (req, res) => {
+  try {
+    await Notification.findByIdAndUpdate(req.params.id, { status:'hidden' }).exec();
+    res.json({ ok: true });
+  } catch { res.status(500).json({ ok:false }); }
+});
+
 
 // === Start ===
 async function start() {
