@@ -7,6 +7,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 
 // === Config ===
 const PORT = Number(process.env.PORT || 3001);
@@ -16,6 +17,7 @@ const JWT_PUBLIC_KEY = process.env.JWT_PUBLIC_KEY || '';
 const INTROSPECT_URL = process.env.LARAVEL_INTROSPECT_URL || '';
 const INTROSPECT_BEARER = process.env.LARAVEL_INTROSPECT_BEARER || '';
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
+const MONGO_URI = process.env.MONGO_URI || '';
 
 // === App/Server/IO ===
 const app = express();
@@ -28,6 +30,24 @@ const io = new Server(server, {
   cors: { origin: CORS_ORIGINS.length ? CORS_ORIGINS : true, credentials: true },
   transports: ['websocket', 'polling'] // permite ambos transportes
 });
+
+// ===== Mongoose Models =====
+let Notification;
+try {
+  // Reusar si ya existe (hot-reload)
+  Notification = mongoose.model('Notification');
+} catch {
+  const NotificationSchema = new mongoose.Schema({
+    userId: { type: String, index: true, required: true },
+    title: { type: String, default: 'Aviso',enum:['Aviso', 'Error', 'Warning', 'Info'] },
+    body: { type: String, default: '' },
+    status: { type: String, default: 'unread', enum:['read', 'unread','hide'] },
+    data: { type: mongoose.Schema.Types.Mixed, default: {} },
+  }, { timestamps: { createdAt: 'createdAt', updatedAt: false } });
+
+  NotificationSchema.index({ userId: 1, createdAt: -1 });
+  Notification = mongoose.model('Notification', NotificationSchema);
+}
 
 app.set('trust proxy', true); // usa X-Forwarded-For si estás detrás de proxy
 
@@ -117,14 +137,25 @@ function requireInternalAuth(req, res, next) {
 app.get('/v1/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // Emitir a un usuario (pruebas y hooks desde Laravel)
-app.post('/v1/emit', requireInternalAuth, (req, res) => {
+app.post('/v1/emit', requireInternalAuth, async (req, res) => {
   const { userId, title, body, data } = req.body || {};
   if (!userId) return res.status(400).json({ ok: false, error: 'missing_userId' });
 
   const payload = { title: title || 'Aviso', body: body || '', data: data || {} };
-  io.to(`user:${userId}`).emit('notify', payload);
 
-  return res.json({ ok: true, delivered: true });
+  // Persistir en Mongo si está configurado
+  let saved = null;
+  if (MONGO_URI && mongoose.connection?.readyState === 1) {
+    try {
+      saved = await Notification.create({ userId: String(userId), ...payload });
+    } catch (e) {
+      // no bloquear por error de persistencia
+    }
+  }
+
+  io.to(`user:${userId}`).emit('notify', { ...payload, id: saved?._id || undefined, createdAt: saved?.createdAt || Date.now() });
+
+  return res.json({ ok: true, delivered: true, id: saved?._id || null });
 });
 
 // Saber si un usuario está online (tamaño del room)
@@ -133,7 +164,51 @@ app.get('/v1/online/:userId', (req, res) => {
   res.json({ ok: true, sockets: room.size });
 });
 
-// === Start ===
-server.listen(PORT, () => {
-  console.log(`notif-sockets (Express+Socket.IO) escuchando en :${PORT}`);
+// Listar notificaciones de un usuario
+app.get('/v1/notifications/:userId', async (req, res) => {
+  if (!MONGO_URI) return res.status(503).json({ ok: false, error: 'mongo_disabled' });
+  if (mongoose.connection?.readyState !== 1) return res.status(503).json({ ok: false, error: 'mongo_disconnected' });
+
+  const { userId } = req.params;
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+  const skip = (page - 1) * limit;
+
+  try {
+    const [items, total] = await Promise.all([
+      Notification.find({ userId: String(userId) })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Notification.countDocuments({ userId: String(userId) })
+    ]);
+
+    res.json({ ok: true, page, limit, total, items });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'mongo_query_error' });
+  }
 });
+
+// === Start ===
+async function start() {
+  // Conectar a Mongo si hay URI
+  if (MONGO_URI) {
+    try {
+      await mongoose.connect(MONGO_URI, {
+        serverSelectionTimeoutMS: 5000
+      });
+      console.log('[mongo] conectado');
+    } catch (e) {
+      console.error('[mongo] no se pudo conectar:', e?.message);
+    }
+  } else {
+    console.log('[mongo] MONGO_URI no configurado, persistencia deshabilitada');
+  }
+
+  server.listen(PORT, () => {
+    console.log(`notif-sockets (Express+Socket.IO) escuchando en :${PORT}`);
+  });
+}
+
+start();
