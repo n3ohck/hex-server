@@ -26,7 +26,7 @@ app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : true, credentials: t
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: CORS_ORIGINS.length ? CORS_ORIGINS : true, credentials: true },
-  transports: ['websocket'] // fuerza WS puro
+  transports: ['websocket', 'polling'] // permite ambos transportes
 });
 
 app.set('trust proxy', true); // usa X-Forwarded-For si estás detrás de proxy
