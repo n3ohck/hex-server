@@ -7,3 +7,4 @@ notify/.env
 notify/yarn.lock
 notify/package-lock.json    
 .env.local
+logs
