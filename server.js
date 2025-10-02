@@ -231,7 +231,7 @@ try {
 } catch {
     const NotificationSchema = new mongoose.Schema({
         userId: {type: String, index: true, required: true},
-        title: {type: String, default: "Aviso", enum: ["Aviso", "Error", "Warning", "Info"]},
+        title: {type: String, default: "Aviso", enum: ["Aviso", "Error", "Warning", "Info","Dispositivo"]},
         body: {type: String, default: ""},
         status: {type: String, default: "unread", enum: ["read", "unread", "hidden"]},
         data: {type: mongoose.Schema.Types.Mixed, default: {}},
