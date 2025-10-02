@@ -25,6 +25,15 @@ const MAX_HTTP_BODY = 5 * 1024 * 1024;
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || "")
     .split(",").map(s => s.trim()).filter(Boolean);
 
+const corsOptions = {
+    origin: true, // refleja cualquier origen
+    credentials: true,
+    methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+    allowedHeaders: ["Content-Type","Authorization","X-Internal-Auth","Idempotency-Key"],
+    exposedHeaders: ["Idempotency-Key"],
+    maxAge: 600
+};
+
 const SOCKET_TOKEN = process.env.SOCKET_TOKEN || "";
 const JWT_PUBLIC_KEY = process.env.JWT_PUBLIC_KEY || "";
 const INTROSPECT_URL = process.env.LARAVEL_INTROSPECT_URL || "";
@@ -200,11 +209,18 @@ try {
 const app = express();
 app.use(express.json());
 app.use(helmet());
-app.use(cors({origin: CORS_ORIGINS.length ? CORS_ORIGINS : true, credentials: true}));
+app.use(cors(corsOptions));
+// importante para preflight
+app.options(/.*/, cors(corsOptions));   // o /^.*$/
 app.set("trust proxy", true);
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {origin: CORS_ORIGINS.length ? CORS_ORIGINS : true, credentials: true},
+    cors: {
+        origin: true,                  // permite cualquier origen
+        credentials: true,
+        methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+        allowedHeaders: ["Content-Type","Authorization","X-Internal-Auth","Idempotency-Key"]
+    },
     transports: ["websocket", "polling"],
 });
 
