@@ -68,6 +68,18 @@ const logLine = (clientIP, buf, tag = "") => {
     return `[${now}] ${tag} IP=${clientIP} LEN=${buf.length} HEX=${hex} ASCII=${ascii}`;
 };
 
+function sentLogFile(meta = {}, prefix = "sent") {
+    // Asegura carpeta por día dentro de LOG_SENT_DIR
+    const day = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const dir = path.join(LOG_SENT_DIR, day);
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+
+    const ipSan = sanitizeIp(meta?.ip || "unknown");
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    // ejemplo: tcp-sent-189_237_97_176-2025-11-04T18-22-33-123Z.log
+    return path.join(dir, `${prefix}-${ipSan}-${ts}.log`);
+}
+
 function safeAppend(file, text) {
     try {
         fs.appendFileSync(file, text + "\n", {flag: "a"});
@@ -182,7 +194,7 @@ async function forwardHexToLaravel(hex, meta) {
                 ok: !!res?.data?.ok,
                 http_status: 200,
                 response: res?.data || null,
-                response_preview: previewStr,
+                response_preview: preview,
                 notifies: Array.isArray(res?.data?.results) ? res.data.results.map(r => r?.notify).filter(Boolean) : (res?.data?.notify ? [res.data.notify] : []),
                 action: "forward_ingest",
                 has_7e: true,
