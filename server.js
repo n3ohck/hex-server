@@ -191,6 +191,7 @@ async function forwardHexToLaravel(hex, meta) {
 
             return res.data;
         } catch (e) {
+            console.log(e)
             lastErr = e;
             const status = e?.response?.status || "no_status";
             const edata = e?.response?.data
