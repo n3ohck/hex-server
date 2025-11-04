@@ -257,6 +257,7 @@ async function postIngestLogToLaravel(payload = {}) {
         const res = await axios.post(LARAVEL_LOG_URL, payload, { headers, timeout: 5000 });
         return res.data;
     } catch (e) {
+        console.log(e)
         // no romper el flujo si falla el log
         warn("postIngestLogToLaravel fail:", e?.response?.status, e?.message);
         return { ok: false, error: e?.message || "log_post_failed" };
