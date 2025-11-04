@@ -46,6 +46,9 @@ const LARAVEL_INGEST_BEARER = process.env.LARAVEL_INGEST_BEARER || "";
 const LARAVEL_TIMEOUT_MS = parseInt(process.env.LARAVEL_TIMEOUT_MS || "5000", 10);
 const LARAVEL_MAX_RETRIES = parseInt(process.env.LARAVEL_MAX_RETRIES || "2", 10);
 
+const LARAVEL_LOG_URL = process.env.LARAVEL_LOG_URL || "";
+const LARAVEL_LOG_BEARER = process.env.LARAVEL_LOG_BEARER || "";
+
 const startTs = new Date().toISOString();
 
 // --- log helpers ---
@@ -121,7 +124,24 @@ function collectNotifies(laravelRes) {
 // --- enviar 1 frame en hex a Laravel (guarda logs_sent) ---
 async function forwardHexToLaravel(hex, meta) {
     if (!LARAVEL_INGEST_URL) return {ok: false, error: "missing_ingest_url"};
-
+    if (!has7eFlags(hex)) {
+        await postIngestLogToLaravel({
+            proto: meta?.proto || "?",
+            ip: meta?.ip || "unknown",
+            endpoint: LARAVEL_INGEST_URL,
+            attempt: 0,
+            hex,
+            hex_len: (hex || "").length,
+            meta,
+            ok: false,
+            http_status: 422,
+            error: "no_7E_flags",
+            action: "drop_no_7e",
+            has_7e: false,
+            hex_preview: String(hex || "").slice(0, 120),
+        });
+        return { ok: false, error: "no_7E_flags" };
+    }
     const body = {hex, received_at: new Date().toISOString()};
     const sfile = sentLogFile(meta, meta?.proto === "TCP" ? "tcp-sent" : "http-sent");
     const maskedAuth = maskBearer(LARAVEL_INGEST_BEARER);
@@ -151,6 +171,24 @@ async function forwardHexToLaravel(hex, meta) {
 
             const fullFile = sfile.replace(/\.log$/, ".json");
             fs.writeFileSync(fullFile, JSON.stringify(res.data, null, 2));
+            await postIngestLogToLaravel({
+                proto: meta?.proto || "?",
+                ip: meta?.ip || "unknown",
+                endpoint: LARAVEL_INGEST_URL,
+                attempt: attempt + 1,
+                hex,
+                hex_len: hex.length,
+                meta,
+                ok: !!res?.data?.ok,
+                http_status: 200,
+                response: res?.data || null,
+                response_preview: previewStr,
+                notifies: Array.isArray(res?.data?.results) ? res.data.results.map(r => r?.notify).filter(Boolean) : (res?.data?.notify ? [res.data.notify] : []),
+                action: "forward_ingest",
+                has_7e: true,
+                hex_preview: hex.slice(0, 120),
+            });
+
             return res.data;
         } catch (e) {
             lastErr = e;
@@ -161,9 +199,40 @@ async function forwardHexToLaravel(hex, meta) {
 
             warn(`forwardHexToLaravel attempt ${attempt + 1} failed: ${e?.message}`);
             safeAppend(sfile, `[${new Date().toISOString()}] ERROR attempt=${attempt + 1} status=${status} detail=${edata}`);
+            await postIngestLogToLaravel({
+                proto: meta?.proto || "?",
+                ip: meta?.ip || "unknown",
+                endpoint: LARAVEL_INGEST_URL,
+                attempt: attempt + 1,
+                hex,
+                hex_len: hex.length,
+                meta,
+                ok: false,
+                http_status: typeof status === "number" ? status : null,
+                error: e?.message || "laravel_forward_failed",
+                response_preview: edata,
+                action: "forward_ingest_error",
+                has_7e: has7eFlags(hex),
+                hex_preview: hex.slice(0, 120),
+            });
             if (attempt < LARAVEL_MAX_RETRIES) await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
         }
     }
+    await postIngestLogToLaravel({
+        proto: meta?.proto || "?",
+        ip: meta?.ip || "unknown",
+        endpoint: LARAVEL_INGEST_URL,
+        attempt: LARAVEL_MAX_RETRIES + 1,
+        hex,
+        hex_len: hex.length,
+        meta,
+        ok: false,
+        http_status: lastErr?.response?.status || null,
+        error: lastErr?.message || "laravel_forward_failed",
+        action: "forward_ingest_failed",
+        has_7e: has7eFlags(hex),
+        hex_preview: hex.slice(0, 120),
+    });
     return {ok: false, error: lastErr?.message || "laravel_forward_failed"};
 }
 
@@ -175,10 +244,23 @@ function maskBearer(b) {
 }
 
 // genera nombre de archivo por cada envío a Laravel
-function sentLogFile(meta = {}, tag = "sent") {
-    const ipSan = sanitizeIp(meta?.ip || "unknown");
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    return path.join(LOG_SENT_DIR, `${tag}-${ipSan}-${ts}.log`);
+function has7eFlags(hex) {
+    const s = String(hex || "").toUpperCase().replace(/[^0-9A-F]/g, "");
+    return s.startsWith("7E") && s.endsWith("7E");
+}
+
+async function postIngestLogToLaravel(payload = {}) {
+    if (!LARAVEL_LOG_URL) return { ok: false, error: "missing_log_url" };
+    try {
+        const headers = { "Content-Type": "application/json" };
+        if (LARAVEL_LOG_BEARER) headers.Authorization = LARAVEL_LOG_BEARER;
+        const res = await axios.post(LARAVEL_LOG_URL, payload, { headers, timeout: 5000 });
+        return res.data;
+    } catch (e) {
+        // no romper el flujo si falla el log
+        warn("postIngestLogToLaravel fail:", e?.response?.status, e?.message);
+        return { ok: false, error: e?.message || "log_post_failed" };
+    }
 }
 
 // --- prepara LOG_DIR ---
@@ -467,6 +549,18 @@ app.post("/ingest-raw", express.raw({type: "*/*", limit: MAX_HTTP_BODY}), async 
         // --- EXTRAER SEGMENTOS HEX Y PROCESAR CADA UNO ---
         const segments = extractHexSegments(Buffer.from(req.body || []));
         if (segments.length === 0) {
+            await postIngestLogToLaravel({
+                proto: "HTTP",
+                ip,
+                endpoint: req.url || "/ingest-raw",
+                attempt: 0,
+                ok: false,
+                http_status: 422,
+                error: "invalid_or_missing_hex",
+                action: "drop_invalid_hex",
+                has_7e: false,
+                hex_len: 0,
+            });
             return res.status(422).json({ ok: false, error: "invalid_or_missing_hex" });
         }
 
@@ -527,6 +621,18 @@ const httpIngestServer = http.createServer((req, res) => {
         // --- EXTRAER SEGMENTOS HEX Y PROCESAR CADA UNO ---
         const segments = extractHexSegments(body);
         if (segments.length === 0) {
+            await postIngestLogToLaravel({
+                proto: "HTTP",
+                ip,
+                endpoint: "http",
+                attempt: 0,
+                ok: false,
+                http_status: 422,
+                error: "invalid_or_missing_hex",
+                action: "drop_invalid_hex",
+                has_7e: false,
+                hex_len: 0,
+            });
             res.writeHead(422, { "Content-Type": "application/json" });
             return res.end(JSON.stringify({ ok: false, error: "invalid_or_missing_hex" }));
         }
@@ -576,6 +682,18 @@ const tcpServer = net.createServer((socket) => {
         // --- EXTRAER SEGMENTOS HEX Y PROCESAR CADA UNO ---
         const segments = extractHexSegments(buf);
         if (segments.length === 0) {
+            await postIngestLogToLaravel({
+                proto: "TCP",
+                ip,
+                endpoint: "tcp",
+                attempt: 0,
+                ok: false,
+                http_status: 422,
+                error: "invalid_or_missing_hex",
+                action: "drop_invalid_hex",
+                has_7e: false,
+                hex_len: 0,
+            });
             safeAppend(logFile, `# DROP ${new Date().toISOString()} invalid_or_missing_hex from ${ip}`);
             return;
         }
