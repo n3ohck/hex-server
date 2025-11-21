@@ -12,7 +12,7 @@ const axios = require("axios");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const https = require('https');
-
+const crypto = require('crypto');
 
 // === Config ===
 const PORT = Number(process.env.PORT || 3001);               // Express + Socket.IO
@@ -131,6 +131,33 @@ function collectNotifies(laravelRes) {
         }
     }
     return list;
+}
+
+function buildIdempotencyKeyFromHex(hex, notify = {}, meta = {}) {
+    const userId    = notify.userId || "";
+    const title     = notify.title || "";
+    const deviceId  =
+        notify.data?.device_id ||
+        notify.data?.deviceId ||
+        notify.data?.device ||
+        "";
+
+    // tomamos solo los primeros bytes de hex para que sea estable
+    const hexPrefix = String(hex || "").slice(0, 40);
+
+    const base = [
+        userId,
+        deviceId,
+        title,
+        meta.proto || "",
+        meta.ip || "",
+        hexPrefix,
+    ].join("|");
+
+    return crypto
+        .createHash("sha1")
+        .update(base)
+        .digest("hex");
 }
 
 // --- enviar 1 frame en hex a Laravel (guarda logs_sent) ---
@@ -436,11 +463,7 @@ async function emitNotification({userId, title = "Aviso", body = "", data = {}, 
             try {
                 const existing = await Idempotency.findOne({key: idempotencyKey}).lean();
                 if (existing?.notificationId) {
-                    io.to(`user:${userId}`).emit("notify", {
-                        ...payload,
-                        id: existing.notificationId,
-                        createdAt: Date.now()
-                    });
+                    // 👇 Ya existe -> NO reenviar, NO crear otra
                     return existing.notificationId;
                 }
             } catch {
@@ -455,11 +478,7 @@ async function emitNotification({userId, title = "Aviso", body = "", data = {}, 
                     try {
                         const ex = await Idempotency.findOne({key: idempotencyKey}).lean();
                         if (ex?.notificationId) {
-                            io.to(`user:${userId}`).emit("notify", {
-                                ...payload,
-                                id: ex.notificationId,
-                                createdAt: Date.now()
-                            });
+                            // si hubo condición de carrera, solo regresamos el id
                             return ex.notificationId;
                         }
                     } catch {
@@ -584,15 +603,21 @@ app.post("/ingest-raw", express.raw({type: "*/*", limit: MAX_HTTP_BODY}), async 
             for (const frame of frames) {
                 const laravelRes = await forwardHexToLaravel(frame, meta);
                 const notifies = collectNotifies(laravelRes);
+
                 for (const n of notifies) {
+                    const idempotencyKey =
+                        n.idempotencyKey ||
+                        buildIdempotencyKeyFromHex(frame, n, meta);
+
                     await emitNotification({
                         userId: String(n.userId),
                         title: n.title || "Aviso",
                         body:  n.body  || "",
                         data:  n.data  || {},
-                        idempotencyKey: n.idempotencyKey || ""
+                        idempotencyKey
                     });
                 }
+
                 results.push({ ok: !!laravelRes?.ok, laravel: laravelRes });
             }
         }
@@ -714,20 +739,22 @@ const tcpServer = net.createServer((socket) => {
 
         const meta = { ip, proto: "TCP" };
 
-        for (const hex of segments) {
-            const frames = splitFramesFromHex(hex);
-            for (const frame of frames) {
-                const laravelRes = await forwardHexToLaravel(frame, meta);
-                const notifies = collectNotifies(laravelRes);
-                for (const n of notifies) {
-                    await emitNotification({
-                        userId: String(n.userId),
-                        title: n.title || "Aviso",
-                        body:  n.body  || "",
-                        data:  n.data  || {},
-                        idempotencyKey: n.idempotencyKey || ""
-                    });
-                }
+        for (const frame of frames) {
+            const laravelRes = await forwardHexToLaravel(frame, meta);
+            const notifies = collectNotifies(laravelRes);
+
+            for (const n of notifies) {
+                const idempotencyKey =
+                    n.idempotencyKey ||
+                    buildIdempotencyKeyFromHex(frame, n, meta); // 👈 generamos uno
+
+                await emitNotification({
+                    userId: String(n.userId),
+                    title: n.title || "Aviso",
+                    body:  n.body  || "",
+                    data:  n.data  || {},
+                    idempotencyKey
+                });
             }
         }
     });
