@@ -185,8 +185,10 @@ async function forwardHexToLaravel(hex, meta) {
     const sfile = sentLogFile(meta, meta?.proto === "TCP" ? "tcp-sent" : "http-sent");
     const maskedAuth = maskBearer(LARAVEL_INGEST_BEARER);
 
-    const headers = {"Content-Type": "application/json"};
-    if (LARAVEL_INGEST_BEARER) headers.Authorization = LARAVEL_INGEST_BEARER;
+    const headers = { "Content-Type": "application/json" };
+    if (LARAVEL_INGEST_BEARER) {
+        headers.Authorization = `Bearer ${LARAVEL_INGEST_BEARER}`;
+    }
 
     safeAppend(
         sfile,
