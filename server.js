@@ -740,7 +740,7 @@ const tcpServer = net.createServer((socket) => {
         }
 
         const meta = { ip, proto: "TCP" };
-
+        const frames = splitFramesFromHex(segments[0]);
         for (const frame of frames) {
             const laravelRes = await forwardHexToLaravel(frame, meta);
             const notifies = collectNotifies(laravelRes);
