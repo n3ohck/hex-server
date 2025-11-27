@@ -560,148 +560,6 @@ app.post("/v1/notifications/:id/hide", requireInternalAuth, async (req, res) => 
     }
 });
 
-// === HTTP INGEST (Express vía /ingest-raw para aceptar binario) ===
-// Si prefieres NO usar el servidor HTTP crudo, puedes mandar tus dispositivos a POST https://notify.tu.com/ingest-raw
-app.post("/ingest-raw", express.raw({type: "*/*", limit: MAX_HTTP_BODY}), async (req, res) => {
-    try {
-        const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
-        const ipSan = sanitizeIp(ip);
-        const connTs = new Date().toISOString().replace(/[:.]/g, "-");
-        const logFile = path.join(LOG_DIR, `http-${ipSan}-${connTs}.log`);
-
-        const header = `${new Date().toISOString()} ${req.method} ${req.url} from ${ip} (${req.body.length} bytes)`;
-        const line = logLine(ip, Buffer.from(req.body || []), "HTTP");
-        safeAppend(logFile, header + "\n" + line);
-
-        const meta = {
-            ip,
-            proto: "HTTP",
-            headers: {"user-agent": req.headers["user-agent"] || ""},
-            path: req.url,
-            method: req.method
-        };
-
-        // --- EXTRAER SEGMENTOS HEX Y PROCESAR CADA UNO ---
-        const segments = extractHexSegments(Buffer.from(req.body || []));
-        if (segments.length === 0) {
-            await postIngestLogToLaravel({
-                proto: "HTTP",
-                ip,
-                endpoint: req.url || "/ingest-raw",
-                attempt: 0,
-                ok: false,
-                http_status: 422,
-                error: "invalid_or_missing_hex",
-                action: "drop_invalid_hex",
-                has_7e: false,
-                hex_len: 0,
-            });
-            return res.status(422).json({ ok: false, error: "invalid_or_missing_hex" });
-        }
-
-        const results = [];
-        for (const hex of segments) {
-            const frames = splitFramesFromHex(hex); // 7E...7E (una o varias)
-            for (const frame of frames) {
-                const laravelRes = await forwardHexToLaravel(frame, meta);
-                const notifies = collectNotifies(laravelRes);
-
-                for (const n of notifies) {
-                    const idempotencyKey =
-                        n.idempotencyKey ||
-                        buildIdempotencyKeyFromHex(frame, n, meta);
-
-                    await emitNotification({
-                        userId: String(n.userId),
-                        title: n.title || "Aviso",
-                        body:  n.body  || "",
-                        data:  n.data  || {},
-                        idempotencyKey
-                    });
-                }
-
-                results.push({ ok: !!laravelRes?.ok, laravel: laravelRes });
-            }
-        }
-
-        res.status(200).json({ ok: true, segments: segments.length, results });
-    } catch (e) {
-        err("ingest-raw error:", e?.message);
-        res.status(500).json({ok: false, error: "ingest_error"});
-    }
-});
-// === HTTP crudo (puerto separado, comportamiento original) ===
-const httpIngestServer = http.createServer((req, res) => {
-    const ip = req.socket.remoteAddress || "unknown";
-    const ipSan = sanitizeIp(ip);
-    const connTs = new Date().toISOString().replace(/[:.]/g, "-");
-    const logFile = path.join(LOG_DIR, `http-${ipSan}-${connTs}.log`);
-
-    let bytes = 0;
-    const chunks = [];
-    req.on("data", (c) => {
-        bytes += c.length;
-        if (bytes > MAX_HTTP_BODY) {
-            warn(`HTTP body too large from ${ip} (${bytes} bytes) - aborting`);
-            res.writeHead(413);
-            res.end("Payload Too Large");
-            req.destroy();
-            return;
-        }
-        chunks.push(c);
-    });
-
-    req.on("end", async () => {
-        const body = Buffer.concat(chunks);
-        const header = `${new Date().toISOString()} ${req.method} ${req.url} from ${ip} (${bytes} bytes)`;
-        const line = logLine(ip, body, "HTTP");
-        safeAppend(logFile, header + "\n" + line);
-
-        const meta = {ip, proto: "HTTP", path: req.url, method: req.method};
-
-        // --- EXTRAER SEGMENTOS HEX Y PROCESAR CADA UNO ---
-        const segments = extractHexSegments(body);
-        if (segments.length === 0) {
-            await postIngestLogToLaravel({
-                proto: "HTTP",
-                ip,
-                endpoint: "http",
-                attempt: 0,
-                ok: false,
-                http_status: 422,
-                error: "invalid_or_missing_hex",
-                action: "drop_invalid_hex",
-                has_7e: false,
-                hex_len: 0,
-            });
-            res.writeHead(422, { "Content-Type": "application/json" });
-            return res.end(JSON.stringify({ ok: false, error: "invalid_or_missing_hex" }));
-        }
-
-        const results = [];
-        for (const hex of segments) {
-            const frames = splitFramesFromHex(hex);
-            for (const frame of frames) {
-                const laravelRes = await forwardHexToLaravel(frame, meta);
-                if (laravelRes?.ok && laravelRes?.notify?.userId) {
-                    await emitNotification({
-                        userId: String(laravelRes.notify.userId),
-                        title: laravelRes.notify.title || "Aviso",
-                        body: laravelRes.notify.body || "",
-                        data: laravelRes.notify.data || {},
-                        idempotencyKey: laravelRes.notify.idempotencyKey || ""
-                    });
-                }
-                results.push({ ok: !!laravelRes?.ok, laravel: laravelRes });
-            }
-        }
-
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, segments: segments.length, results, ts: new Date().toISOString() }));
-    });
-    req.on("error", (e) => err(`HTTP req error from ${ip}: ${e.message}`));
-});
-
 // === TCP server ===
 const tcpServer = net.createServer((socket) => {
     const ip = socket.remoteAddress || "unknown";
@@ -740,23 +598,27 @@ const tcpServer = net.createServer((socket) => {
         }
 
         const meta = { ip, proto: "TCP" };
-        const frames = splitFramesFromHex(segments[0]);
-        for (const frame of frames) {
-            const laravelRes = await forwardHexToLaravel(frame, meta);
-            const notifies = collectNotifies(laravelRes);
 
-            for (const n of notifies) {
-                const idempotencyKey =
-                    n.idempotencyKey ||
-                    buildIdempotencyKeyFromHex(frame, n, meta); // 👈 generamos uno
+        for (const hex of segments) {
+            const frames = splitFramesFromHex(hex); // 👈 ahora sí por segment
 
-                await emitNotification({
-                    userId: String(n.userId),
-                    title: n.title || "Aviso",
-                    body:  n.body  || "",
-                    data:  n.data  || {},
-                    idempotencyKey
-                });
+            for (const frame of frames) {
+                const laravelRes = await forwardHexToLaravel(frame, meta);
+                const notifies = collectNotifies(laravelRes);
+
+                for (const n of notifies) {
+                    const idempotencyKey =
+                        n.idempotencyKey ||
+                        buildIdempotencyKeyFromHex(frame, n, meta);
+
+                    await emitNotification({
+                        userId: String(n.userId),
+                        title: n.title || "Aviso",
+                        body:  n.body  || "",
+                        data:  n.data  || {},
+                        idempotencyKey
+                    });
+                }
             }
         }
     });
@@ -794,9 +656,7 @@ async function start() {
         log("[mongo] MONGO_URI no configurado, persistencia deshabilitada");
     }
 
-    httpIngestServer.listen(HTTP_INGEST_PORT);
     tcpServer.listen(TCP_PORT);
-
     server.listen(PORT, () => log(`Unified server (Express+Socket.IO) :${PORT}`));
 }
 
