@@ -561,6 +561,7 @@ app.post("/v1/notifications/:id/hide", requireInternalAuth, async (req, res) => 
 });
 
 // === TCP server ===
+// === TCP server ===
 const tcpServer = net.createServer((socket) => {
     const ip = socket.remoteAddress || "unknown";
     const ipSan = sanitizeIp(ip);
@@ -575,12 +576,15 @@ const tcpServer = net.createServer((socket) => {
     log(`TCP conn from ${ip} -> ${path.basename(logFile)}`);
 
     socket.on("data", async (buf) => {
+        // Log crudo para debug
         const line = logLine(ip, buf, "TCP");
         safeAppend(logFile, line);
 
-        // --- EXTRAER SEGMENTOS HEX Y PROCESAR CADA UNO ---
-        const segments = extractHexSegments(buf);
-        if (segments.length === 0) {
+        // 👉 Aquí ya NO usamos extractHexSegments
+        const hex = buf.toString("hex").toUpperCase();
+
+        const frames = splitFramesFromHex(hex); // 7E...7E (una o varias)
+        if (!frames.length) {
             await postIngestLogToLaravel({
                 proto: "TCP",
                 ip,
@@ -593,32 +597,30 @@ const tcpServer = net.createServer((socket) => {
                 has_7e: false,
                 hex_len: 0,
             });
-            safeAppend(logFile, `# DROP ${new Date().toISOString()} invalid_or_missing_hex from ${ip}`);
+            safeAppend(
+                logFile,
+                `# DROP ${new Date().toISOString()} invalid_or_missing_hex from ${ip}`
+            );
             return;
         }
 
         const meta = { ip, proto: "TCP" };
 
-        for (const hex of segments) {
-            const frames = splitFramesFromHex(hex); // 👈 ahora sí por segment
+        for (const frame of frames) {
+            const laravelRes = await forwardHexToLaravel(frame, meta);
+            const notifies = collectNotifies(laravelRes);
 
-            for (const frame of frames) {
-                const laravelRes = await forwardHexToLaravel(frame, meta);
-                const notifies = collectNotifies(laravelRes);
+            for (const n of notifies) {
+                const idempotencyKey =
+                    n.idempotencyKey || buildIdempotencyKeyFromHex(frame, n, meta);
 
-                for (const n of notifies) {
-                    const idempotencyKey =
-                        n.idempotencyKey ||
-                        buildIdempotencyKeyFromHex(frame, n, meta);
-
-                    await emitNotification({
-                        userId: String(n.userId),
-                        title: n.title || "Aviso",
-                        body:  n.body  || "",
-                        data:  n.data  || {},
-                        idempotencyKey
-                    });
-                }
+                await emitNotification({
+                    userId: String(n.userId),
+                    title: n.title || "Aviso",
+                    body:  n.body  || "",
+                    data:  n.data  || {},
+                    idempotencyKey,
+                });
             }
         }
     });
@@ -628,16 +630,17 @@ const tcpServer = net.createServer((socket) => {
         warn(`TCP timeout ${ip}`);
         socket.end();
     });
+
     socket.on("end", () => {
         safeAppend(logFile, `# CLOSE ${new Date().toISOString()}`);
         log(`TCP close ${ip}`);
     });
+
     socket.on("error", (e) => {
         safeAppend(logFile, `# ERROR ${new Date().toISOString()} ${e.message}`);
         err(`TCP socket error ${ip}: ${e.message}`);
     });
 });
-
 tcpServer.on("listening", () => log(`TCP listening on ${TCP_PORT}`));
 tcpServer.on("error", (e) => err(`TCP server error: ${e.message}`));
 
