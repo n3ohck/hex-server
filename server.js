@@ -638,8 +638,6 @@ const tcpServer = net.createServer((socket) => {
     });
 });
 
-httpIngestServer.on("listening", () => log(`HTTP ingest listening on ${HTTP_INGEST_PORT}`));
-httpIngestServer.on("error", (e) => err(`HTTP ingest error: ${e.message}`));
 tcpServer.on("listening", () => log(`TCP listening on ${TCP_PORT}`));
 tcpServer.on("error", (e) => err(`TCP server error: ${e.message}`));
 
