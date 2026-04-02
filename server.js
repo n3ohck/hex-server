@@ -120,16 +120,50 @@ function splitFramesFromHex(hex) {
 
 function collectNotifies(laravelRes) {
     const list = [];
+    const seen = new Set();
+
     if (!laravelRes || typeof laravelRes !== "object") return list;
 
-    if (laravelRes.notify && laravelRes.notify.userId) {
-        list.push(laravelRes.notify);
-    }
+    const fingerprint = (candidate) => {
+        return JSON.stringify([
+            candidate?.userId || "",
+            candidate?.title || "",
+            candidate?.body || "",
+            candidate?.data?.shipment_id || "",
+            candidate?.data?.device_id || "",
+            candidate?.data?.reading_id || "",
+            candidate?.idempotencyKey || "",
+        ]);
+    };
+
+    const pushNotify = (candidate) => {
+        if (!(candidate && typeof candidate === "object" && candidate.userId)) return;
+
+        const key = fingerprint(candidate);
+        if (seen.has(key)) return;
+
+        seen.add(key);
+        list.push(candidate);
+    };
+
+    const pushMany = (candidates) => {
+        if (!Array.isArray(candidates)) return;
+        for (const item of candidates) {
+            pushNotify(item);
+        }
+    };
+
+    pushNotify(laravelRes.notify);
+    pushMany(laravelRes.notifies);
+
     if (Array.isArray(laravelRes.results)) {
         for (const it of laravelRes.results) {
-            if (it && it.notify && it.notify.userId) list.push(it.notify);
+            if (!it || typeof it !== "object") continue;
+            pushNotify(it.notify);
+            pushMany(it.notifies);
         }
     }
+
     return list;
 }
 
